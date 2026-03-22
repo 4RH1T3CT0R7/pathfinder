@@ -1,0 +1,26 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: cargo test --manifest-path crates/pathfinder-core/Cargo.toml
+      - run: cargo clippy --manifest-path crates/pathfinder-core/Cargo.toml -- -D warnings
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo install wasm-pack
+      - run: wasm-pack build crates/pathfinder-core --target web --out-dir ../../web/pkg
+      - run: cd web && npm ci && npx tsc --noEmit
+      - run: cd web && npx vite build

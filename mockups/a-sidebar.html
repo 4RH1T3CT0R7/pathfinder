@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pathfinder - Option A: Sidebar</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #06080d;
+    --bg2: #0d1117;
+    --bg3: #161b22;
+    --bg4: #1c2333;
+    --border: #1a2744;
+    --text: #e6edf3;
+    --text2: #8b949e;
+    --text3: #484f58;
+    --cyan: #00d4aa;
+    --purple: #7b61ff;
+    --amber: #f0b429;
+    --red: #ff6b6b;
+    --blue: #58a6ff;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+  .layout { display: flex; flex-direction: column; height: 100%; }
+
+  /* Header */
+  header {
+    height: 48px; background: var(--bg2); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 20px; gap: 12px; flex-shrink: 0;
+  }
+  .logo { font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 700; color: var(--cyan); letter-spacing: 0.03em; }
+  .logo span { animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .header-tag { font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace; background: var(--bg3); padding: 3px 8px; border-radius: 4px; }
+
+  /* Content */
+  .content { display: flex; flex: 1; overflow: hidden; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 260px; background: var(--bg2); border-right: 1px solid var(--border);
+    overflow-y: auto; flex-shrink: 0; padding: 0;
+  }
+  .sidebar-section { padding: 14px 16px; border-bottom: 1px solid rgba(26,39,68,0.5); }
+  .sidebar-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-bottom: 10px;
+  }
+  .sidebar select, .sidebar input[type="number"] {
+    width: 100%; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 7px 10px; border-radius: 6px; font-size: 13px; font-family: 'Inter', sans-serif;
+    outline: none; transition: border-color 0.2s;
+  }
+  .sidebar select:focus, .sidebar input:focus { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,212,170,0.12); }
+  .size-row { display: flex; gap: 8px; }
+  .size-row > div { flex: 1; }
+  .size-row label { font-size: 11px; color: var(--text2); display: block; margin-bottom: 4px; }
+  .seed-row { display: flex; gap: 8px; }
+  .seed-row input { flex: 1; }
+  .btn-sm {
+    padding: 7px 14px; background: var(--bg3); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text2); font-size: 12px; cursor: pointer; transition: all 0.15s;
+  }
+  .btn-sm:hover { background: var(--bg4); border-color: var(--text3); color: var(--text); }
+  .speed-slider { width: 100%; accent-color: var(--cyan); margin: 4px 0; }
+  .speed-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+
+  /* Main */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Canvas area */
+  .canvas-area { flex: 1; position: relative; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+  .maze-demo {
+    width: 420px; height: 420px; border: 2px solid var(--cyan); border-radius: 2px;
+    display: grid; position: relative; overflow: hidden;
+    box-shadow: 0 0 40px rgba(0,212,170,0.06), inset 0 0 60px rgba(0,212,170,0.02);
+  }
+  .maze-demo canvas { width: 100%; height: 100%; }
+
+  /* Playback bar */
+  .playback {
+    height: 52px; background: var(--bg2); border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0;
+  }
+  .play-btn {
+    width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    background: var(--bg3); border: 1px solid var(--border); color: var(--text2); cursor: pointer;
+    font-size: 14px; transition: all 0.15s;
+  }
+  .play-btn:hover { background: var(--bg4); color: var(--text); border-color: var(--text3); }
+  .play-btn.primary {
+    background: rgba(0,212,170,0.1); border-color: var(--cyan); color: var(--cyan); width: 52px;
+  }
+  .play-btn.primary:hover { background: rgba(0,212,170,0.2); }
+  .playback-speed {
+    margin-left: 20px; display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--text3); font-family: 'JetBrains Mono', monospace;
+  }
+  .playback-speed input { width: 100px; accent-color: var(--cyan); }
+  .playback-state {
+    margin-left: auto; margin-right: 20px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--cyan);
+    background: rgba(0,212,170,0.08); padding: 4px 10px; border-radius: 4px;
+  }
+
+  /* Metrics */
+  .metrics {
+    height: 90px; background: var(--bg2); border-top: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 20px; gap: 14px; flex-shrink: 0;
+    overflow-x: auto;
+  }
+  .metric-card {
+    padding: 10px 18px; background: var(--bg3); border-radius: 8px;
+    border: 1px solid var(--border); min-width: 110px;
+    transition: border-color 0.2s;
+  }
+  .metric-card:hover { border-color: var(--text3); }
+  .metric-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .metric-value { font-size: 22px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  .metric-value.cyan { color: var(--cyan); }
+  .metric-value.green { color: #34d399; }
+  .metric-value.purple { color: var(--purple); }
+  .metric-value.amber { color: var(--amber); }
+  .metric-value.blue { color: var(--blue); }
+  .metric-value.dim { color: var(--text2); font-size: 16px; }
+
+  /* Action buttons in sidebar */
+  .action-buttons { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+  .btn-action {
+    padding: 9px 0; border-radius: 6px; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; text-align: center; width: 100%;
+    font-family: 'Inter', sans-serif;
+  }
+  .btn-generate {
+    background: rgba(0,212,170,0.1); border: 1px solid var(--cyan); color: var(--cyan);
+  }
+  .btn-generate:hover { background: rgba(0,212,170,0.2); }
+  .btn-solve {
+    background: rgba(123,97,255,0.1); border: 1px solid var(--purple); color: var(--purple);
+  }
+  .btn-solve:hover { background: rgba(123,97,255,0.2); }
+  .btn-reset {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text2);
+  }
+  .btn-reset:hover { background: var(--bg3); color: var(--text); }
+
+  .variant-badge {
+    position: fixed; top: 12px; right: 16px; background: var(--cyan); color: var(--bg);
+    padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; z-index: 100;
+    font-family: 'JetBrains Mono', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="variant-badge">A - SIDEBAR</div>
+<div class="layout">
+  <header>
+    <div class="logo">&gt; pathfinder<span>_</span></div>
+    <div class="header-tag">maze visualizer & solver</div>
+  </header>
+  <div class="content">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Maze Size</div>
+        <div class="size-row">
+          <div><label>Width</label><input type="number" value="30"></div>
+          <div><label>Height</label><input type="number" value="30"></div>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Seed</div>
+        <div class="seed-row">
+          <input type="number" value="42">
+          <button class="btn-sm">Rnd</button>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Generation</div>
+        <select>
+          <option>DFS Recursive Backtracker</option>
+          <option>Randomized Kruskal</option>
+          <option>Randomized Prim</option>
+          <option>Eller's Algorithm</option>
+          <option>Wilson's Algorithm</option>
+          <option>Growing Tree</option>
+          <option>Binary Tree</option>
+          <option>Sidewinder</option>
+          <option>Aldous-Broder</option>
+          <option>Hunt and Kill</option>
+        </select>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Solving</div>
+        <select>
+          <option>BFS (Breadth-First)</option>
+          <option>DFS (Depth-First)</option>
+          <option>A* Search</option>
+          <option>Dijkstra</option>
+          <option>Greedy Best-First</option>
+          <option>Wall Follower</option>
+          <option>Tremaux</option>
+          <option>Dead-End Filling</option>
+        </select>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Speed</div>
+        <input type="range" class="speed-slider" min="0" max="100" value="50">
+        <div class="speed-labels"><span>slow</span><span>50%</span><span>fast</span></div>
+      </div>
+      <div class="sidebar-section">
+        <div class="action-buttons">
+          <button class="btn-action btn-generate">Generate</button>
+          <button class="btn-action btn-solve">Solve</button>
+          <button class="btn-action btn-reset">Reset</button>
+        </div>
+      </div>
+    </aside>
+    <div class="main">
+      <div class="canvas-area">
+        <div class="maze-demo"><canvas id="maze"></canvas></div>
+      </div>
+      <div class="playback">
+        <button class="play-btn">|&laquo;</button>
+        <button class="play-btn">&laquo;</button>
+        <button class="play-btn primary">&#9654;</button>
+        <button class="play-btn">&raquo;</button>
+        <button class="play-btn">&raquo;|</button>
+        <div class="playback-speed">
+          <span>speed</span>
+          <input type="range" min="0" max="100" value="50">
+        </div>
+        <div class="playback-state">generating...</div>
+      </div>
+      <div class="metrics">
+        <div class="metric-card"><div class="metric-label">Steps</div><div class="metric-value cyan">1,247</div></div>
+        <div class="metric-card"><div class="metric-label">Visited</div><div class="metric-value purple">892</div></div>
+        <div class="metric-card"><div class="metric-label">Path Length</div><div class="metric-value green">47</div></div>
+        <div class="metric-card"><div class="metric-label">Efficiency</div><div class="metric-value amber">78%</div></div>
+        <div class="metric-card"><div class="metric-label">Dead Ends</div><div class="metric-value blue">34</div></div>
+        <div class="metric-card"><div class="metric-label">Maze</div><div class="metric-value dim">30 x 30</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+// Draw demo maze
+const c = document.getElementById('maze');
+const dpr = window.devicePixelRatio || 1;
+c.width = 420 * dpr; c.height = 420 * dpr;
+const ctx = c.getContext('2d');
+ctx.scale(dpr, dpr);
+const S = 14, W = 30, H = 30;
+// Generate random walls
+const walls = [];
+for (let i = 0; i < W*H; i++) walls.push(Math.random() < 0.35 ? 0xF : (Math.random()*16)|0);
+// BG
+ctx.fillStyle = '#06080d';
+ctx.fillRect(0, 0, 420, 420);
+// Cells with visit states
+for (let r = 0; r < H; r++) for (let col = 0; col < W; col++) {
+  const x = col*S, y = r*S;
+  const rnd = Math.random();
+  if (r === 0 && col === 0) ctx.fillStyle = '#00d4aa';
+  else if (r === H-1 && col === W-1) ctx.fillStyle = '#ff6b6b';
+  else if (rnd < 0.15) ctx.fillStyle = 'rgba(0,212,170,0.25)'; // solution
+  else if (rnd < 0.5) ctx.fillStyle = 'rgba(123,97,255,0.12)'; // visited
+  else if (rnd < 0.6) ctx.fillStyle = 'rgba(88,166,255,0.15)'; // frontier
+  else ctx.fillStyle = '#0a0e14';
+  ctx.fillRect(x, y, S, S);
+}
+// Walls
+ctx.strokeStyle = '#1a3355';
+ctx.lineWidth = 1;
+for (let r = 0; r < H; r++) for (let col = 0; col < W; col++) {
+  const x = col*S+0.5, y = r*S+0.5, w = walls[r*W+col];
+  if (w & 1) { ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+S,y); ctx.stroke(); }
+  if (w & 2) { ctx.beginPath(); ctx.moveTo(x+S,y); ctx.lineTo(x+S,y+S); ctx.stroke(); }
+  if (w & 4) { ctx.beginPath(); ctx.moveTo(x,y+S); ctx.lineTo(x+S,y+S); ctx.stroke(); }
+  if (w & 8) { ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x,y+S); ctx.stroke(); }
+}
+// Border
+ctx.strokeStyle = '#00d4aa';
+ctx.lineWidth = 2;
+ctx.strokeRect(1, 1, W*S-2, H*S-2);
+// Solution path
+ctx.strokeStyle = '#34d399';
+ctx.lineWidth = 2;
+ctx.lineCap = 'round';
+ctx.beginPath();
+let px = S/2, py = S/2;
+ctx.moveTo(px, py);
+for (let i = 0; i < 20; i++) {
+  px += (Math.random() > 0.3 ? 1 : 0) * S;
+  py += (Math.random() > 0.5 ? 1 : 0) * S;
+  px = Math.min(px, (W-1)*S+S/2);
+  py = Math.min(py, (H-1)*S+S/2);
+  ctx.lineTo(px, py);
+}
+ctx.stroke();
+</script>
+</body>
+</html>

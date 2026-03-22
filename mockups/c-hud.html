@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pathfinder - Option C: Floating HUD</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #04060a; --bg2: #0d1117; --bg3: #161b22; --bg4: #1c2333;
+    --border: #1a2744; --text: #e6edf3; --text2: #8b949e; --text3: #484f58;
+    --cyan: #00d4aa; --purple: #7b61ff; --amber: #f0b429; --red: #ff6b6b; --blue: #58a6ff;
+    --glass: rgba(10, 14, 23, 0.75);
+    --glass-border: rgba(255,255,255,0.06);
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; height: 100vh; overflow: hidden; }
+
+  /* Fullscreen canvas */
+  .canvas-full { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .canvas-full canvas { width: 100%; height: 100%; }
+
+  /* Glass panels */
+  .glass-panel {
+    position: fixed; z-index: 10;
+    background: var(--glass); backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--glass-border); border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 16px; transition: opacity 0.3s;
+  }
+
+  /* Controls panel */
+  .controls-panel { top: 16px; left: 16px; width: 220px; }
+  .cp-logo { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: var(--cyan); margin-bottom: 16px; }
+  .cp-logo span { animation: blink 1s step-end infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .cp-group { margin-bottom: 12px; }
+  .cp-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text3); font-family: 'JetBrains Mono', monospace; margin-bottom: 6px; }
+  .cp-select {
+    width: 100%; background: rgba(6,8,13,0.6); border: 1px solid var(--glass-border); color: var(--text);
+    padding: 7px 10px; border-radius: 8px; font-size: 12px; outline: none;
+  }
+  .cp-select:focus { border-color: rgba(0,212,170,0.4); }
+  .cp-row { display: flex; gap: 6px; }
+  .cp-row > div { flex: 1; }
+  .cp-row label { font-size: 10px; color: var(--text3); display: block; margin-bottom: 3px; }
+  .cp-input {
+    width: 100%; background: rgba(6,8,13,0.6); border: 1px solid var(--glass-border); color: var(--text);
+    padding: 6px 8px; border-radius: 8px; font-size: 12px; font-family: 'JetBrains Mono', monospace;
+    text-align: center; outline: none;
+  }
+  .cp-btn {
+    width: 100%; padding: 9px; border-radius: 8px; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s; margin-bottom: 6px; font-family: 'Inter', sans-serif;
+  }
+  .cp-btn-gen { background: rgba(0,212,170,0.12); border: 1px solid rgba(0,212,170,0.4); color: var(--cyan); }
+  .cp-btn-gen:hover { background: rgba(0,212,170,0.25); }
+  .cp-btn-sol { background: rgba(123,97,255,0.12); border: 1px solid rgba(123,97,255,0.4); color: var(--purple); }
+  .cp-btn-sol:hover { background: rgba(123,97,255,0.25); }
+  .cp-btn-rst { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); color: var(--text2); }
+
+  /* Metrics panel */
+  .metrics-panel { bottom: 80px; right: 16px; width: 280px; }
+  .mp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mp-card { padding: 10px; background: rgba(6,8,13,0.4); border-radius: 8px; border: 1px solid var(--glass-border); }
+  .mp-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .mp-value { font-size: 20px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+  .mp-spark { margin-top: 6px; height: 24px; background: rgba(0,212,170,0.06); border-radius: 4px; overflow: hidden; position: relative; }
+  .mp-spark-bar { position: absolute; bottom: 0; width: 100%; display: flex; align-items: flex-end; gap: 1px; padding: 2px; }
+  .mp-spark-bar div { flex: 1; background: rgba(0,212,170,0.3); border-radius: 1px; min-height: 2px; }
+
+  /* Playback bar */
+  .playback-panel {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: var(--glass); backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid var(--glass-border); border-radius: 14px;
+    padding: 10px 20px; display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .pb { width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); color: var(--text2);
+    cursor: pointer; font-size: 13px; transition: all 0.15s; }
+  .pb:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+  .pb.main { background: rgba(0,212,170,0.15); border-color: rgba(0,212,170,0.4); color: var(--cyan); width: 56px; }
+  .pb-speed { display: flex; align-items: center; gap: 6px; margin-left: 12px; }
+  .pb-speed input { width: 80px; accent-color: var(--cyan); }
+  .pb-speed-label { font-size: 10px; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+  .pb-state { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--cyan);
+    background: rgba(0,212,170,0.08); padding: 4px 10px; border-radius: 6px; margin-left: 8px; }
+
+  .variant-badge {
+    position: fixed; top: 16px; right: 16px; background: var(--amber); color: var(--bg);
+    padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 13px; z-index: 100;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Glow effect on canvas */
+  .glow-ring {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 600px; height: 600px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(0,212,170,0.03) 0%, transparent 70%);
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div class="variant-badge">C - HUD</div>
+<div class="glow-ring"></div>
+<div class="canvas-full"><canvas id="maze"></canvas></div>
+
+<div class="glass-panel controls-panel">
+  <div class="cp-logo">&gt; pathfinder<span>_</span></div>
+  <div class="cp-group">
+    <div class="cp-label">Generation</div>
+    <select class="cp-select"><option>DFS Recursive Backtracker</option><option>Kruskal</option><option>Prim</option><option>Eller</option><option>Wilson</option></select>
+  </div>
+  <div class="cp-group">
+    <div class="cp-label">Solving</div>
+    <select class="cp-select"><option>A* Search</option><option>BFS</option><option>DFS</option><option>Dijkstra</option><option>Greedy BFS</option><option>Wall Follower</option></select>
+  </div>
+  <div class="cp-group">
+    <div class="cp-label">Size</div>
+    <div class="cp-row">
+      <div><label>W</label><input class="cp-input" value="30"></div>
+      <div><label>H</label><input class="cp-input" value="30"></div>
+    </div>
+  </div>
+  <div class="cp-group">
+    <div class="cp-label">Seed</div>
+    <input class="cp-input" value="42" style="width:100%">
+  </div>
+  <button class="cp-btn cp-btn-gen">Generate</button>
+  <button class="cp-btn cp-btn-sol">Solve</button>
+  <button class="cp-btn cp-btn-rst">Reset</button>
+</div>
+
+<div class="glass-panel metrics-panel">
+  <div class="cp-label" style="margin-bottom:10px">Metrics</div>
+  <div class="mp-grid">
+    <div class="mp-card"><div class="mp-label">Steps</div><div class="mp-value" style="color:var(--cyan)">1,247</div></div>
+    <div class="mp-card"><div class="mp-label">Visited</div><div class="mp-value" style="color:var(--purple)">892</div></div>
+    <div class="mp-card"><div class="mp-label">Path</div><div class="mp-value" style="color:#34d399">47</div></div>
+    <div class="mp-card"><div class="mp-label">Efficiency</div><div class="mp-value" style="color:var(--amber)">78%</div></div>
+  </div>
+  <div class="mp-spark">
+    <div class="mp-spark-bar" id="spark"></div>
+  </div>
+</div>
+
+<div class="playback-panel">
+  <div class="pb">|&laquo;</div>
+  <div class="pb">&laquo;</div>
+  <div class="pb main">&#9654;</div>
+  <div class="pb">&raquo;</div>
+  <div class="pb">&raquo;|</div>
+  <div class="pb-speed">
+    <div class="pb-speed-label">speed</div>
+    <input type="range" min="0" max="100" value="60">
+  </div>
+  <div class="pb-state">solving...</div>
+</div>
+
+<script>
+// Sparkline
+const spark = document.getElementById('spark');
+for (let i = 0; i < 40; i++) {
+  const d = document.createElement('div');
+  d.style.height = (3 + Math.random() * 18) + 'px';
+  spark.appendChild(d);
+}
+
+// Fullscreen maze
+const c = document.getElementById('maze');
+const dpr = window.devicePixelRatio || 1;
+const W = 40, H = 30;
+c.width = window.innerWidth * dpr;
+c.height = window.innerHeight * dpr;
+const ctx = c.getContext('2d');
+ctx.scale(dpr, dpr);
+const vw = window.innerWidth, vh = window.innerHeight;
+const S = Math.min(vw / (W + 4), vh / (H + 4));
+const ox = (vw - W * S) / 2, oy = (vh - H * S) / 2;
+
+ctx.fillStyle = '#04060a'; ctx.fillRect(0, 0, vw, vh);
+
+// Draw cells
+for (let r = 0; r < H; r++) for (let col = 0; col < W; col++) {
+  const x = ox + col * S, y = oy + r * S, rnd = Math.random();
+  if (r === 0 && col === 0) ctx.fillStyle = '#00d4aa';
+  else if (r === H-1 && col === W-1) ctx.fillStyle = '#ff6b6b';
+  else if (rnd < 0.1) ctx.fillStyle = 'rgba(0,212,170,0.3)';
+  else if (rnd < 0.35) ctx.fillStyle = 'rgba(123,97,255,0.08)';
+  else if (rnd < 0.45) ctx.fillStyle = 'rgba(88,166,255,0.08)';
+  else ctx.fillStyle = '#070b12';
+  ctx.fillRect(x, y, S, S);
+}
+
+// Walls
+ctx.strokeStyle = '#12253a'; ctx.lineWidth = 1;
+for (let r = 0; r < H; r++) for (let col = 0; col < W; col++) {
+  const x = ox+col*S+0.5, y = oy+r*S+0.5, w = Math.random()<0.3?0xF:(Math.random()*16)|0;
+  if (w&1){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+S,y);ctx.stroke();}
+  if (w&2){ctx.beginPath();ctx.moveTo(x+S,y);ctx.lineTo(x+S,y+S);ctx.stroke();}
+  if (w&4){ctx.beginPath();ctx.moveTo(x,y+S);ctx.lineTo(x+S,y+S);ctx.stroke();}
+  if (w&8){ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+S);ctx.stroke();}
+}
+
+// Border glow
+ctx.strokeStyle = '#00d4aa'; ctx.lineWidth = 2;
+ctx.shadowColor = '#00d4aa'; ctx.shadowBlur = 12;
+ctx.strokeRect(ox, oy, W*S, H*S);
+ctx.shadowBlur = 0;
+
+// Solution path
+ctx.strokeStyle = '#34d399'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+ctx.shadowColor = '#34d399'; ctx.shadowBlur = 8;
+ctx.beginPath();
+let px = ox+S/2, py = oy+S/2; ctx.moveTo(px, py);
+for (let i=0;i<30;i++){px+=(Math.random()>0.3?1:0)*S;py+=(Math.random()>0.5?1:0)*S;px=Math.min(px,ox+(W-1)*S+S/2);py=Math.min(py,oy+(H-1)*S+S/2);ctx.lineTo(px,py);}
+ctx.stroke();
+ctx.shadowBlur = 0;
+</script>
+</body>
+</html>

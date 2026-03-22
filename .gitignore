@@ -1,0 +1,16 @@
+# Rust
+/target/
+Cargo.lock
+
+# WASM
+/web/pkg/
+
+# Node
+/web/node_modules/
+/web/dist/
+
+# IDE
+.idea/
+*.swp
+*.swo
+.DS_Store
