@@ -6,6 +6,7 @@ const PlaybackControls: Component<{
   store: MazeState;
   onPause: () => void;
   onStep: () => void;
+  onStepBack: () => void;
   onReset: () => void;
 }> = (props) => {
   const btnBase: Record<string, string> = {
@@ -79,6 +80,18 @@ const PlaybackControls: Component<{
         }}
       >
         {isRunning() ? '\u23F8 ' + t('pause') : '\u25B6 ' + t('resume')}
+      </button>
+
+      {/* Step back */}
+      <button
+        onClick={props.onStepBack}
+        disabled={!isPaused()}
+        style={{
+          ...btnBase,
+          opacity: isPaused() ? '1' : '0.4',
+        }}
+      >
+        {'|\u25C0'} {t('stepBack')}
       </button>
 
       {/* Step forward */}

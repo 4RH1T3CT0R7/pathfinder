@@ -31,10 +31,13 @@ pub struct WallFollowerSolver {
     started: bool,
     /// Cached directions array from the maze topology.
     directions: &'static [Direction],
+    /// Max steps to prevent infinite loops on non-standard topologies.
+    max_steps: u32,
+    step_count: u32,
 }
 
 impl WallFollowerSolver {
-    pub fn new(_cell_count: u32, start: u32, end: u32) -> Self {
+    pub fn new(cell_count: u32, start: u32, end: u32) -> Self {
         WallFollowerSolver {
             current: start,
             facing: Direction::EAST,
@@ -46,6 +49,8 @@ impl WallFollowerSolver {
             solution_path: Vec::new(),
             started: false,
             directions: Direction::all_rect(),
+            max_steps: cell_count * 10, // safety limit
+            step_count: 0,
         }
     }
 
@@ -130,9 +135,18 @@ impl SteppableSolver for WallFollowerSolver {
             return None;
         }
 
+        // Check step limit to prevent infinite loops
+        self.step_count += 1;
+        if self.step_count > self.max_steps {
+            self.done = true;
+            return None;
+        }
+
         // Cache directions from maze on first use
         if !self.started {
             self.directions = maze.directions();
+            // Set initial facing to first available direction
+            self.facing = self.directions[0];
         }
 
         // First call: emit the start cell.
@@ -216,6 +230,7 @@ impl SteppableSolver for WallFollowerSolver {
         self.trail.clear();
         self.solution_path.clear();
         self.started = false;
+        self.step_count = 0;
     }
 
     fn is_done(&self) -> bool {

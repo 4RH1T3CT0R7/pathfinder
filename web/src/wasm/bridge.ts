@@ -68,9 +68,9 @@ export function stepGenerate(n: number): number {
   if (performed > 0 && cellStateBuffer) {
     try {
       const ptr = engine.cell_states_ptr();
-      if (ptr && wasmModule && wasmModule.memory) {
+      if (ptr && wasmMemory) {
         const count = cellStateBuffer.length;
-        const mem = new Uint8Array(wasmModule.memory.buffer, ptr, count);
+        const mem = new Uint8Array(wasmMemory.buffer, ptr, count);
         cellStateBuffer.set(mem);
       }
     } catch (_) {
@@ -82,8 +82,8 @@ export function stepGenerate(n: number): number {
     if (visitOrderBuffer) {
       try {
         const ptr = engine.visit_order_ptr();
-        if (ptr && wasmModule && wasmModule.memory) {
-          const mem = new Uint32Array(wasmModule.memory.buffer, ptr, visitOrderBuffer.length);
+        if (ptr && wasmMemory) {
+          const mem = new Uint32Array(wasmMemory.buffer, ptr, visitOrderBuffer.length);
           visitOrderBuffer.set(mem);
         }
       } catch (_) {}
@@ -96,14 +96,10 @@ export function stepGenerate(n: number): number {
 export function isGenerationDone(): boolean {
   if (!engine) return true;
   const done = engine.is_generation_done();
-  // When generation completes, mark all cells as visited
+  // When generation completes, reset all cell states to unvisited
+  // (the maze is built, generation colors are no longer needed)
   if (done && cellStateBuffer) {
-    const count = cellStateBuffer.length;
-    for (let i = 0; i < count; i++) {
-      if (cellStateBuffer[i] !== CELL_UNVISITED) {
-        cellStateBuffer[i] = CELL_VISITED;
-      }
-    }
+    cellStateBuffer.fill(CELL_UNVISITED);
   }
   return done;
 }
@@ -127,9 +123,9 @@ export function stepSolve(n: number): number {
   if (performed > 0 && cellStateBuffer) {
     try {
       const ptr = engine.cell_states_ptr();
-      if (ptr && wasmModule && wasmModule.memory) {
+      if (ptr && wasmMemory) {
         const count = cellStateBuffer.length;
-        const mem = new Uint8Array(wasmModule.memory.buffer, ptr, count);
+        const mem = new Uint8Array(wasmMemory.buffer, ptr, count);
         cellStateBuffer.set(mem);
       }
     } catch (_) {
@@ -143,8 +139,8 @@ export function stepSolve(n: number): number {
     if (visitOrderBuffer) {
       try {
         const ptr = engine.visit_order_ptr();
-        if (ptr && wasmModule && wasmModule.memory) {
-          const mem = new Uint32Array(wasmModule.memory.buffer, ptr, visitOrderBuffer.length);
+        if (ptr && wasmMemory) {
+          const mem = new Uint32Array(wasmMemory.buffer, ptr, visitOrderBuffer.length);
           visitOrderBuffer.set(mem);
         }
       } catch (_) {}
@@ -183,8 +179,8 @@ export function getCellPositions(): Float64Array {
   try {
     const ptr = engine.cell_positions_ptr();
     const len = engine.cell_positions_len();
-    if (ptr && wasmModule.memory) {
-      const mem = new Float64Array(wasmModule.memory.buffer, ptr, len);
+    if (ptr && wasmMemory) {
+      const mem = new Float64Array(wasmMemory.buffer, ptr, len);
       return new Float64Array(mem);
     }
   } catch (_) {
@@ -204,8 +200,8 @@ export function getWallData(width: number, height: number): Uint8Array {
     // Try zero-copy via WASM memory if walls_ptr is available
     try {
       const ptr = engine.walls_ptr();
-      if (ptr && wasmModule && wasmModule.memory) {
-        const mem = new Uint8Array(wasmModule.memory.buffer, ptr, count);
+      if (ptr && wasmMemory) {
+        const mem = new Uint8Array(wasmMemory.buffer, ptr, count);
         data.set(mem);
         return data;
       }
@@ -261,4 +257,143 @@ export function toggleWall(cell: number, direction: number): void {
 
 export function getEngine(): any {
   return engine;
+}
+
+// =====================================================
+// Multi-engine support for animated comparison mode
+// =====================================================
+
+export interface ComparisonLane {
+  engine: any;
+  algo: string;
+  algoId: number;
+  done: boolean;
+  cellStates: Uint8Array;
+  wallData: Uint8Array;
+  solutionPath: number[];
+  metrics: { steps_taken: number; cells_visited: number; path_length: number };
+  cellPositions?: Float64Array;
+}
+
+let comparisonLanes: ComparisonLane[] = [];
+
+/**
+ * Create N comparison lanes, each with its own WASM engine instance.
+ * All share the same maze (same seed, size, generator).
+ */
+export function createComparisonLanes(
+  width: number, height: number, seed: number, topology: number,
+  genAlgoId: number, solverAlgoIds: { algo: string; id: number }[],
+  startCell: number, endCell: number,
+): void {
+  if (!wasmModule) return;
+  comparisonLanes = [];
+  const seedHi = (seed >>> 16) & 0xFFFF;
+  const seedLo = seed & 0xFFFF;
+
+  for (const { algo, id } of solverAlgoIds) {
+    // Create independent engine
+    const eng = new wasmModule.MazeEngine(width, height, seedHi, seedLo, topology);
+    // Generate maze instantly
+    eng.init_generator(genAlgoId, 0);
+    let guard = 0;
+    while (!eng.is_generation_done() && guard < 100) {
+      eng.step_generate(999999);
+      guard++;
+    }
+    // Init solver
+    eng.init_solver(id, startCell, endCell);
+
+    const count = eng.cell_count();
+    comparisonLanes.push({
+      engine: eng,
+      algo,
+      algoId: id,
+      done: false,
+      cellStates: new Uint8Array(count),
+      wallData: new Uint8Array(count),
+      solutionPath: [],
+      metrics: { steps_taken: 0, cells_visited: 0, path_length: 0 },
+    });
+
+    // Read initial wall data
+    const lane = comparisonLanes[comparisonLanes.length - 1];
+    for (let i = 0; i < count; i++) {
+      lane.wallData[i] = eng.cell_walls(i);
+    }
+
+    // Read cell positions for non-rectangular topologies
+    try {
+      const ptr = eng.cell_positions_ptr();
+      const len = eng.cell_positions_len();
+      if (ptr && wasmMemory && len > 0) {
+        const mem = new Float64Array(wasmMemory.buffer, ptr, len);
+        lane.cellPositions = new Float64Array(mem);
+      }
+    } catch (_) {
+      // Not all topologies provide positions
+    }
+  }
+}
+
+/**
+ * Step all comparison lanes by N steps. Returns true if all are done.
+ */
+export function stepComparisonLanes(n: number): boolean {
+  let allDone = true;
+  for (const lane of comparisonLanes) {
+    if (lane.done) continue;
+    lane.engine.step_solve(n);
+
+    // Read cell states from engine
+    const count = lane.cellStates.length;
+    try {
+      const ptr = lane.engine.cell_states_ptr();
+      if (ptr && wasmMemory) {
+        const mem = new Uint8Array(wasmMemory.buffer, ptr, count);
+        lane.cellStates.set(mem);
+      }
+    } catch (_) {
+      for (let i = 0; i < count; i++) {
+        lane.cellStates[i] = lane.engine.cell_state(i);
+      }
+    }
+
+    // Read metrics
+    try {
+      const m = JSON.parse(lane.engine.get_metrics_json());
+      lane.metrics = { steps_taken: m.steps_taken, cells_visited: m.cells_visited, path_length: m.path_length };
+    } catch (_) {}
+
+    if (lane.engine.is_solving_done()) {
+      lane.done = true;
+      try {
+        lane.solutionPath = JSON.parse(lane.engine.solution_path_json());
+        // Mark solution in cell states
+        for (const cell of lane.solutionPath) {
+          if (cell >= 0 && cell < count) lane.cellStates[cell] = CELL_SOLUTION;
+        }
+      } catch (_) {}
+    } else {
+      allDone = false;
+    }
+  }
+  return allDone;
+}
+
+/**
+ * Get current lane snapshots for rendering.
+ */
+export function getComparisonLaneData(): ComparisonLane[] {
+  return comparisonLanes.map(lane => ({
+    ...lane,
+    cellStates: new Uint8Array(lane.cellStates),
+    wallData: new Uint8Array(lane.wallData),
+    solutionPath: [...lane.solutionPath],
+    cellPositions: lane.cellPositions ? new Float64Array(lane.cellPositions) : undefined,
+  }));
+}
+
+export function clearComparisonLanes(): void {
+  comparisonLanes = [];
 }

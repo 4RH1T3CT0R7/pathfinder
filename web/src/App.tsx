@@ -15,6 +15,7 @@ import {
   ALL_SOLVER_ALGOS,
   SOLVER_ALGO_NAMES,
   TOPOLOGY_ID,
+  RECT_ONLY_SOLVERS,
 } from './stores/maze';
 import type { SolverAlgo, Metrics, ComparisonSolveData, RunHistoryEntry } from './stores/maze';
 import * as wasm from './wasm/bridge';
@@ -30,6 +31,27 @@ const App: Component = () => {
   let solveStartTime = 0;
   let graphStepCounter = 0;
   let mazeCanvasEl: HTMLCanvasElement | undefined;
+
+  // Snapshot history for step-back (circular buffer, max 500 snapshots)
+  interface Snapshot {
+    wallData: Uint8Array;
+    cellStates: Uint8Array;
+    metricsJson: string;
+  }
+  const snapshots: Snapshot[] = [];
+  const MAX_SNAPSHOTS = 500;
+
+  const pushSnapshot = () => {
+    const wallData = wasm.getWallData(store.activeWidth(), store.activeHeight());
+    const cellStates = wasm.getCellStates(store.activeWidth(), store.activeHeight());
+    const metricsJson = wasm.getMetricsJson();
+    if (snapshots.length >= MAX_SNAPSHOTS) snapshots.shift();
+    snapshots.push({ wallData, cellStates, metricsJson });
+  };
+
+  const popSnapshot = (): Snapshot | undefined => {
+    return snapshots.pop();
+  };
 
   // Speed 0% = 1 step + 200ms delay (very slow)
   // Speed 50% = 10 steps + 16ms delay (visible)
@@ -60,9 +82,9 @@ const App: Component = () => {
   };
 
   const updateRenderState = () => {
-    const wallData = wasm.getWallData(store.width, store.height);
+    const wallData = wasm.getWallData(store.activeWidth(), store.activeHeight());
     store.setWallData(wallData);
-    const states = wasm.getCellStates(store.width, store.height);
+    const states = wasm.getCellStates(store.activeWidth(), store.activeHeight());
     store.setCellStates(states);
     const metricsJson = wasm.getMetricsJson();
     try { store.setMetrics(JSON.parse(metricsJson)); } catch {}
@@ -171,6 +193,9 @@ const App: Component = () => {
     store.setStartCell(0);
     const topologyId = TOPOLOGY_ID[store.topology()];
     await wasm.loadWasm();
+    // Lock in the active dimensions at generation time
+    store.setActiveWidth(store.width);
+    store.setActiveHeight(store.height);
     wasm.createEngine(store.width, store.height, store.seed, topologyId);
     const cellCount = wasm.getCellCount();
     store.setEndCell(cellCount > 0 ? cellCount - 1 : 0);
@@ -178,6 +203,7 @@ const App: Component = () => {
     wasm.initGenerator(genAlgoId, 0);
     store.setSolutionPath([]);
     store.setCellStates(null);
+    snapshots.length = 0;
     store.setPlaybackState('generating');
     setShowSidebar(false);
     animateGeneration();
@@ -245,24 +271,65 @@ const App: Component = () => {
     }
   };
 
+  const animateComparison = () => {
+    const state = store.playbackState();
+    if (state === 'solve-paused') return;
+
+    const batch = speedToBatchSize(store.speed());
+    const allDone = wasm.stepComparisonLanes(batch);
+
+    // Update comparison data from lanes
+    const lanes = wasm.getComparisonLaneData();
+    const data: ComparisonSolveData[] = lanes.map(lane => ({
+      algo: lane.algo as SolverAlgo,
+      algoName: SOLVER_ALGO_NAMES[lane.algo as SolverAlgo] || lane.algo,
+      wallData: lane.wallData,
+      cellStates: lane.cellStates,
+      solutionPath: lane.solutionPath,
+      metrics: {
+        steps_taken: lane.metrics.steps_taken,
+        cells_visited: lane.metrics.cells_visited,
+        path_length: lane.metrics.path_length,
+        dead_ends: 0,
+        frontier_max_size: 0,
+        elapsed_us: 0,
+      },
+      cellPositions: lane.cellPositions,
+    }));
+    store.setComparisonData(data);
+
+    if (allDone) {
+      store.setPlaybackState('done');
+      stopAnimation();
+      return;
+    }
+
+    scheduleNext(animateComparison);
+  };
+
   const handleCompareSolve = async () => {
     if (!store.wallData()) return;
     stopAnimation();
 
-    const algo1 = store.solverAlgo();
-    const algo2 = store.compareAlgo();
+    const algos = store.compareAlgos();
+    if (algos.length < 2) return;
 
-    // Run solver 1: recreate engine with same maze, solve instantly
-    await regenerateMazeInstant();
-    const data1 = runSolverInstant(algo1);
+    const topologyId = TOPOLOGY_ID[store.topology()];
+    const genAlgoId = GENERATOR_ALGO_ID[store.generatorAlgo()];
+    await wasm.loadWasm();
 
-    // Run solver 2: recreate engine with same maze, solve instantly
-    await regenerateMazeInstant();
-    const data2 = runSolverInstant(algo2);
+    // Create independent engines for each algorithm
+    wasm.createComparisonLanes(
+      store.activeWidth(), store.activeHeight(), store.seed, topologyId,
+      genAlgoId,
+      algos.map(a => ({ algo: a, id: SOLVER_ALGO_ID[a] })),
+      store.startCell(),
+      store.endCell(),
+    );
 
-    store.setComparisonData([data1, data2]);
-    store.setPlaybackState('done');
+    store.setPlaybackState('solving');
     setShowSidebar(false);
+    animateComparison();
   };
 
   const handleAutoCompare = async () => {
@@ -271,7 +338,10 @@ const App: Component = () => {
 
     const results: { algo: SolverAlgo; algoName: string; steps: number; visited: number; pathLength: number; timeMs: number; isBest: boolean }[] = [];
 
-    for (const algo of ALL_SOLVER_ALGOS) {
+    const applicableAlgos = ALL_SOLVER_ALGOS.filter(
+      a => store.topology() === 'rectangular' || !RECT_ONLY_SOLVERS.includes(a)
+    );
+    for (const algo of applicableAlgos) {
       await regenerateMazeInstant();
 
       const t0 = performance.now();
@@ -290,16 +360,25 @@ const App: Component = () => {
     }
 
     // Determine "best": shortest path (non-zero), then fewest steps
+    // If multiple are tied, no single winner
     const withPath = results.filter((r) => r.pathLength > 0);
     if (withPath.length > 0) {
       withPath.sort((a, b) => {
         if (a.pathLength !== b.pathLength) return a.pathLength - b.pathLength;
         return a.steps - b.steps;
       });
-      const bestAlgo = withPath[0].algo;
-      for (const r of results) {
-        r.isBest = r.algo === bestAlgo;
+      const best = withPath[0];
+      // Count how many share the exact same best score
+      const tiedCount = withPath.filter(
+        r => r.pathLength === best.pathLength && r.steps === best.steps
+      ).length;
+      // Only mark winner if there's a unique best
+      if (tiedCount === 1) {
+        for (const r of results) {
+          r.isBest = r.algo === best.algo;
+        }
       }
+      // Otherwise all isBest stay false — tie
     }
 
     store.setCompareResults(results);
@@ -353,12 +432,14 @@ const App: Component = () => {
     if (state === 'gen-paused' || state === 'generating') {
       stopAnimation();
       store.setPlaybackState('gen-paused');
+      pushSnapshot(); // save state before stepping
       wasm.stepGenerate(1);
       updateRenderState();
       if (wasm.isGenerationDone()) store.setPlaybackState('idle');
     } else if (state === 'solve-paused' || state === 'solving') {
       stopAnimation();
       store.setPlaybackState('solve-paused');
+      pushSnapshot(); // save state before stepping
       wasm.stepSolve(1);
       updateRenderState();
       if (wasm.isSolvingDone()) {
@@ -368,6 +449,17 @@ const App: Component = () => {
         store.setPlaybackState('done');
       }
     }
+  };
+
+  const handleStepBack = () => {
+    const state = store.playbackState();
+    if (state !== 'gen-paused' && state !== 'solve-paused') return;
+    const snapshot = popSnapshot();
+    if (!snapshot) return;
+    // Restore visual state from snapshot
+    store.setWallData(snapshot.wallData);
+    store.setCellStates(snapshot.cellStates);
+    try { store.setMetrics(JSON.parse(snapshot.metricsJson)); } catch {}
   };
 
   const handleReset = () => {
@@ -555,8 +647,9 @@ const App: Component = () => {
               {(data) => (
                 <ComparisonView
                   data={data()}
-                  width={store.width}
-                  height={store.height}
+                  width={store.activeWidth()}
+                  height={store.activeHeight()}
+                  topology={store.topology()}
                 />
               )}
             </Show>
@@ -573,6 +666,7 @@ const App: Component = () => {
             store={store}
             onPause={handlePause}
             onStep={handleStep}
+            onStepBack={handleStepBack}
             onReset={handleReset}
           />
           <MetricsPanel store={store} />

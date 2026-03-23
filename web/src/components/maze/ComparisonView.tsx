@@ -1,26 +1,7 @@
 import { Component, createEffect, createSignal, onMount, onCleanup } from 'solid-js';
 import type { ComparisonSolveData } from '../../stores/maze';
-
-const WALL_N = 0b0001;
-const WALL_E = 0b0010;
-const WALL_S = 0b0100;
-const WALL_W = 0b1000;
-
-const CELL_UNVISITED = 0;
-const CELL_FRONTIER = 1;
-const CELL_VISITED = 2;
-const CELL_ACTIVE = 3;
-const CELL_SOLUTION = 4;
-const CELL_BACKTRACKED = 5;
-
-const CELL_COLORS: Record<number, string> = {
-  [CELL_UNVISITED]: '#0a0e14',
-  [CELL_FRONTIER]: 'rgba(88,166,255,0.15)',
-  [CELL_VISITED]: 'rgba(123,97,255,0.12)',
-  [CELL_ACTIVE]: 'rgba(0,212,170,0.25)',
-  [CELL_SOLUTION]: 'rgba(52,211,153,0.4)',
-  [CELL_BACKTRACKED]: 'rgba(255,75,75,0.08)',
-};
+import { renderMazeToCanvas } from '../../rendering/mazeRenderer';
+import type { MazeRenderData } from '../../rendering/mazeRenderer';
 
 function formatNumber(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
@@ -33,11 +14,22 @@ interface PaneProps {
   width: number;
   height: number;
   isWinner: boolean;
+  topology?: string;
 }
 
 const ComparisonPane: Component<PaneProps> = (props) => {
   let canvasRef: HTMLCanvasElement | undefined;
   let containerRef: HTMLDivElement | undefined;
+
+  // Per-pane zoom/pan state
+  const [viewScale, setViewScale] = createSignal(1);
+  const [viewOffsetX, setViewOffsetX] = createSignal(0);
+  const [viewOffsetY, setViewOffsetY] = createSignal(0);
+  let isPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let panStartOX = 0;
+  let panStartOY = 0;
 
   const renderMaze = () => {
     const canvas = canvasRef;
@@ -49,6 +41,7 @@ const ComparisonPane: Component<PaneProps> = (props) => {
     const dpr = window.devicePixelRatio || 1;
     const displayWidth = container.clientWidth;
     const displayHeight = container.clientHeight;
+    if (displayWidth === 0 || displayHeight === 0) return;
 
     canvas.width = displayWidth * dpr;
     canvas.height = displayHeight * dpr;
@@ -62,122 +55,94 @@ const ComparisonPane: Component<PaneProps> = (props) => {
     const cellStates = props.data.cellStates;
     const w = props.width;
     const h = props.height;
+    const topology = props.topology || 'rectangular';
 
     if (!wallData || wallData.length === 0) return;
 
-    const padding = 16;
-    const availW = displayWidth - 2 * padding;
-    const availH = displayHeight - 2 * padding;
-    const cellSize = Math.max(2, Math.min(availW / w, availH / h));
-    const mazeW = cellSize * w;
-    const mazeH = cellSize * h;
-    const baseOffsetX = (displayWidth - mazeW) / 2;
-    const baseOffsetY = (displayHeight - mazeH) / 2;
+    // Determine start/end cells
+    const totalCells = wallData.length;
+    const startCell = 0;
+    const endCell = totalCells - 1;
+
+    // Build render data
+    const renderData: MazeRenderData = {
+      wallData,
+      cellStates,
+      solutionPath,
+      w,
+      h,
+      startCell,
+      endCell,
+      topology,
+      cellPositions: props.data.cellPositions,
+    };
+
+    // Apply zoom/pan
+    const scale = viewScale();
+    const ox = viewOffsetX();
+    const oy = viewOffsetY();
 
     ctx.save();
-    ctx.translate(baseOffsetX, baseOffsetY);
 
-    const solutionSet = new Set(solutionPath);
+    if (topology === 'rectangular') {
+      // For rect: zoom/scale centered on maze
+      const padding = 4;
+      const availW = displayWidth - 2 * padding;
+      const availH = displayHeight - 2 * padding;
+      const cellSize = Math.max(1, Math.min(availW / w, availH / h));
+      const mazeW = cellSize * w;
+      const mazeH = cellSize * h;
 
-    for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) {
-        const idx = row * w + col;
-        const x = col * cellSize;
-        const y = row * cellSize;
-
-        if (idx === 0) {
-          ctx.fillStyle = '#00d4aa';
-        } else if (idx === w * h - 1) {
-          ctx.fillStyle = '#ff6b6b';
-        } else if (solutionSet.has(idx)) {
-          ctx.fillStyle = CELL_COLORS[CELL_SOLUTION];
-        } else if (cellStates && idx < cellStates.length) {
-          ctx.fillStyle = CELL_COLORS[cellStates[idx]] || CELL_COLORS[CELL_UNVISITED];
-        } else {
-          ctx.fillStyle = CELL_COLORS[CELL_UNVISITED];
-        }
-        ctx.fillRect(x, y, cellSize, cellSize);
-      }
+      ctx.translate(
+        ox + (displayWidth / 2) * (1 - scale),
+        oy + (displayHeight / 2) * (1 - scale),
+      );
+      ctx.scale(scale, scale);
+    } else {
+      // For non-rect: zoom around center
+      const cx = displayWidth / 2;
+      const cy = displayHeight / 2;
+      ctx.translate(cx + ox, cy + oy);
+      ctx.scale(scale, scale);
+      ctx.translate(-cx, -cy);
     }
 
-    const wallPath = new Path2D();
-    for (let row = 0; row < h; row++) {
-      for (let col = 0; col < w; col++) {
-        const idx = row * w + col;
-        const walls = wallData[idx];
-        const x = col * cellSize + 0.5;
-        const y = row * cellSize + 0.5;
-
-        if (walls & WALL_N) {
-          wallPath.moveTo(x, y);
-          wallPath.lineTo(x + cellSize, y);
-        }
-        if (walls & WALL_W) {
-          wallPath.moveTo(x, y);
-          wallPath.lineTo(x, y + cellSize);
-        }
-      }
-    }
-
-    for (let col = 0; col < w; col++) {
-      const idx = (h - 1) * w + col;
-      const walls = wallData[idx];
-      if (walls & WALL_S) {
-        const x = col * cellSize + 0.5;
-        const y = h * cellSize + 0.5;
-        wallPath.moveTo(x, y);
-        wallPath.lineTo(x + cellSize, y);
-      }
-    }
-
-    for (let row = 0; row < h; row++) {
-      const idx = row * w + (w - 1);
-      const walls = wallData[idx];
-      if (walls & WALL_E) {
-        const x = w * cellSize + 0.5;
-        const y = row * cellSize + 0.5;
-        wallPath.moveTo(x, y);
-        wallPath.lineTo(x, y + cellSize);
-      }
-    }
-
-    ctx.strokeStyle = '#1a3355';
-    ctx.lineWidth = cellSize > 10 ? 1.5 : 1;
-    ctx.stroke(wallPath);
-
-    if (solutionPath.length > 1 && cellSize >= 3) {
-      const pathLineWidth = Math.max(1.5, cellSize / 4);
-      ctx.save();
-      ctx.strokeStyle = '#34d399';
-      ctx.lineWidth = pathLineWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.shadowColor = '#34d399';
-      ctx.shadowBlur = 8;
-
-      ctx.beginPath();
-      for (let i = 0; i < solutionPath.length; i++) {
-        const cell = solutionPath[i];
-        const col = cell % w;
-        const row = Math.floor(cell / w);
-        const cx = col * cellSize + cellSize / 2;
-        const cy = row * cellSize + cellSize / 2;
-        if (i === 0) ctx.moveTo(cx, cy);
-        else ctx.lineTo(cx, cy);
-      }
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    ctx.save();
-    ctx.strokeStyle = '#00d4aa';
-    ctx.lineWidth = 2;
-    ctx.shadowColor = 'rgba(0,212,170,0.3)';
-    ctx.shadowBlur = 12;
-    ctx.strokeRect(0, 0, mazeW, mazeH);
-    ctx.restore();
+    renderMazeToCanvas(ctx, renderData, displayWidth, displayHeight);
 
     ctx.restore();
+  };
+
+  const handleWheel = (e: WheelEvent) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    setViewScale(s => Math.max(0.3, Math.min(8, s * factor)));
+  };
+
+  const handlePointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    isPanning = true;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panStartOX = viewOffsetX();
+    panStartOY = viewOffsetY();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: PointerEvent) => {
+    if (!isPanning) return;
+    setViewOffsetX(panStartOX + e.clientX - panStartX);
+    setViewOffsetY(panStartOY + e.clientY - panStartY);
+  };
+
+  const handlePointerUp = (e: PointerEvent) => {
+    isPanning = false;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+  };
+
+  const resetView = () => {
+    setViewScale(1);
+    setViewOffsetX(0);
+    setViewOffsetY(0);
   };
 
   onMount(() => {
@@ -188,16 +153,26 @@ const ComparisonPane: Component<PaneProps> = (props) => {
   });
 
   createEffect(() => {
-    // Track the reactive data to trigger re-renders
-    void props.data;
+    const d = props.data;
+    void d.wallData;
+    void d.cellStates;
+    void d.solutionPath;
+    void d.metrics;
+    void d.cellPositions;
     void props.width;
     void props.height;
-    renderMaze();
+    void props.isWinner;
+    void props.topology;
+    viewScale();
+    viewOffsetX();
+    viewOffsetY();
+    queueMicrotask(() => renderMaze());
   });
 
   return (
     <div style={{
-      flex: '1',
+      width: '100%',
+      height: '100%',
       display: 'flex',
       'flex-direction': 'column',
       'min-width': '0',
@@ -235,14 +210,21 @@ const ComparisonPane: Component<PaneProps> = (props) => {
         )}
       </div>
 
-      {/* Canvas */}
+      {/* Canvas with zoom/pan */}
       <div
         ref={containerRef}
+        onWheel={handleWheel}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onDblClick={resetView}
         style={{
           flex: '1',
           position: 'relative',
           background: 'var(--bg)',
           overflow: 'hidden',
+          cursor: 'grab',
+          'touch-action': 'none',
         }}
       >
         <canvas
@@ -295,53 +277,64 @@ const ComparisonPane: Component<PaneProps> = (props) => {
 };
 
 interface ComparisonViewProps {
-  data: [ComparisonSolveData, ComparisonSolveData];
+  data: ComparisonSolveData[];
   width: number;
   height: number;
+  topology?: string;
 }
 
 const ComparisonView: Component<ComparisonViewProps> = (props) => {
-  const winner = (): 0 | 1 | -1 => {
-    const [a, b] = props.data;
-    const aPath = a.metrics.path_length;
-    const bPath = b.metrics.path_length;
-    // No path found by one or both
-    if (aPath === 0 && bPath === 0) return -1;
-    if (aPath === 0) return 1;
-    if (bPath === 0) return 0;
-    // Shorter path wins
-    if (aPath < bPath) return 0;
-    if (bPath < aPath) return 1;
-    // Same path length -- fewer steps wins
-    if (a.metrics.steps_taken < b.metrics.steps_taken) return 0;
-    if (b.metrics.steps_taken < a.metrics.steps_taken) return 1;
-    return -1; // tie
+  const winnerIndex = (): number => {
+    // Find shortest path length among all (ignoring 0 = not found yet)
+    let bestPath = Infinity;
+    for (const d of props.data) {
+      const p = d.metrics.path_length;
+      if (p > 0 && p < bestPath) bestPath = p;
+    }
+    if (bestPath === Infinity) return -1; // no one found a path yet
+
+    // Count how many have this best path
+    const withBest = props.data
+      .map((d, i) => ({ i, p: d.metrics.path_length, s: d.metrics.steps_taken }))
+      .filter(x => x.p === bestPath);
+
+    if (withBest.length === 0) return -1;
+    if (withBest.length === 1) return withBest[0].i;
+
+    // Multiple with same path length -- pick fewest steps
+    withBest.sort((a, b) => a.s - b.s);
+    // If top 2 have same steps too -- tie, no winner
+    if (withBest[0].s === withBest[1].s) return -1;
+    return withBest[0].i;
   };
+
+  const count = () => props.data.length;
+  // Grid layout: up to 4 columns, rows auto
+  const cols = () => count() <= 2 ? count() : count() <= 4 ? 2 : count() <= 6 ? 3 : 4;
+  const rows = () => Math.ceil(count() / cols());
 
   return (
     <div style={{
       width: '100%',
       height: '100%',
-      display: 'flex',
+      display: 'grid',
+      'grid-template-columns': `repeat(${cols()}, 1fr)`,
+      'grid-template-rows': `repeat(${rows()}, 1fr)`,
+      gap: '2px',
+      background: 'var(--border)',
       overflow: 'hidden',
     }}>
-      <ComparisonPane
-        data={props.data[0]}
-        width={props.width}
-        height={props.height}
-        isWinner={winner() === 0}
-      />
-      <div style={{
-        width: '2px',
-        background: 'var(--border)',
-        'flex-shrink': '0',
-      }} />
-      <ComparisonPane
-        data={props.data[1]}
-        width={props.width}
-        height={props.height}
-        isWinner={winner() === 1}
-      />
+      {props.data.map((d, i) => (
+        <div style={{ overflow: 'hidden', background: 'var(--bg)', 'min-height': '0' }}>
+          <ComparisonPane
+            data={d}
+            width={props.width}
+            height={props.height}
+            isWinner={winnerIndex() === i}
+            topology={props.topology}
+          />
+        </div>
+      ))}
     </div>
   );
 };

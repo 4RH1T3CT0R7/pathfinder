@@ -64,7 +64,7 @@ const RunHistory: Component<Props> = (props) => {
         <div style={{
           background: 'var(--bg2)',
           'border-top': '1px solid var(--border)',
-          'max-height': '200px',
+          'max-height': '150px',
           'overflow-y': 'auto',
           'overflow-x': 'auto',
           'flex-shrink': '0',

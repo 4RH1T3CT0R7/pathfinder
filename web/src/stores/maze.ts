@@ -9,6 +9,9 @@ export const TOPOLOGY_ID: Record<Topology, number> = { rectangular: 0, hexagonal
 /** Generators that only work on rectangular grids. */
 export const RECT_ONLY_GENERATORS: GeneratorAlgo[] = ['binary_tree', 'sidewinder', 'eller'];
 
+/** Solvers that only work reliably on rectangular grids. */
+export const RECT_ONLY_SOLVERS: SolverAlgo[] = ['wall_follower', 'tremaux'];
+
 export const ALL_SOLVER_ALGOS: SolverAlgo[] = [
   'bfs', 'dfs', 'astar', 'dijkstra', 'greedy_bfs', 'wall_follower', 'tremaux', 'dead_end_filling',
 ];
@@ -84,6 +87,7 @@ export interface ComparisonSolveData {
   cellStates: Uint8Array;
   solutionPath: number[];
   metrics: Metrics;
+  cellPositions?: Float64Array;
 }
 
 export interface MazeState {
@@ -91,6 +95,11 @@ export interface MazeState {
   setWidth: (w: number) => void;
   height: number;
   setHeight: (h: number) => void;
+  /** Active dimensions of the currently generated maze (set on Generate) */
+  activeWidth: () => number;
+  setActiveWidth: (w: number) => void;
+  activeHeight: () => number;
+  setActiveHeight: (h: number) => void;
   seed: number;
   setSeed: (s: number) => void;
   topology: () => Topology;
@@ -121,12 +130,14 @@ export interface MazeState {
   setCompareMode: (v: boolean) => void;
   compareAlgo: () => SolverAlgo;
   setCompareAlgo: (a: SolverAlgo) => void;
+  compareAlgos: () => SolverAlgo[];
+  setCompareAlgos: (a: SolverAlgo[]) => void;
   compareResults: () => CompareResult[];
   setCompareResults: (r: CompareResult[]) => void;
 
-  // Side-by-side comparison data (two completed solver runs)
-  comparisonData: () => [ComparisonSolveData, ComparisonSolveData] | null;
-  setComparisonData: (d: [ComparisonSolveData, ComparisonSolveData] | null) => void;
+  // Side-by-side comparison data (multiple solver runs, live or completed)
+  comparisonData: () => ComparisonSolveData[] | null;
+  setComparisonData: (d: ComparisonSolveData[] | null) => void;
 
   // Tool mode for interactive editing
   toolMode: () => ToolMode;
@@ -161,7 +172,9 @@ export interface MazeState {
 export function createMazeStore(): MazeState {
   const [width, setWidth] = createSignal(20);
   const [height, setHeight] = createSignal(20);
-  const [seed, setSeed] = createSignal(42);
+  const [activeWidth, setActiveWidth] = createSignal(20);
+  const [activeHeight, setActiveHeight] = createSignal(20);
+  const [seed, setSeed] = createSignal(Math.floor(Math.random() * 999999));
   const [topology, setTopology] = createSignal<Topology>('rectangular');
   const [generatorAlgo, setGeneratorAlgo] = createSignal<GeneratorAlgo>('dfs');
   const [solverAlgo, setSolverAlgo] = createSignal<SolverAlgo>('bfs');
@@ -181,8 +194,9 @@ export function createMazeStore(): MazeState {
 
   const [compareMode, setCompareMode] = createSignal(false);
   const [compareAlgo, setCompareAlgo] = createSignal<SolverAlgo>('astar');
+  const [compareAlgos, setCompareAlgos] = createSignal<SolverAlgo[]>(['bfs', 'astar']);
   const [compareResults, setCompareResults] = createSignal<CompareResult[]>([]);
-  const [comparisonData, setComparisonData] = createSignal<[ComparisonSolveData, ComparisonSolveData] | null>(null);
+  const [comparisonData, setComparisonData] = createSignal<ComparisonSolveData[] | null>(null);
 
   const [toolMode, setToolMode] = createSignal<ToolMode>('pan');
   const [startCell, setStartCell] = createSignal(0);
@@ -198,7 +212,7 @@ export function createMazeStore(): MazeState {
   let nextHistoryId = 1;
   const addRunHistory = (entry: Omit<RunHistoryEntry, 'id'>) => {
     const newEntry: RunHistoryEntry = { ...entry, id: nextHistoryId++ };
-    setRunHistory((prev) => [newEntry, ...prev].slice(0, 20));
+    setRunHistory((prev) => [newEntry, ...prev].slice(0, 5));
   };
 
   return {
@@ -206,6 +220,10 @@ export function createMazeStore(): MazeState {
     setWidth: (w) => setWidth(w),
     get height() { return height(); },
     setHeight: (h) => setHeight(h),
+    activeWidth,
+    setActiveWidth,
+    activeHeight,
+    setActiveHeight,
     get seed() { return seed(); },
     setSeed: (s) => setSeed(s),
     topology,
@@ -230,6 +248,8 @@ export function createMazeStore(): MazeState {
     setCompareMode,
     compareAlgo,
     setCompareAlgo,
+    compareAlgos,
+    setCompareAlgos,
     compareResults,
     setCompareResults,
     comparisonData,

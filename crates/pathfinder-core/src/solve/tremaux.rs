@@ -29,10 +29,12 @@ pub struct TremauxSolver {
     /// Cleaned solution path.
     solution_path: Vec<u32>,
     started: bool,
+    max_steps: u32,
+    step_count: u32,
 }
 
 impl TremauxSolver {
-    pub fn new(_cell_count: u32, start: u32, end: u32) -> Self {
+    pub fn new(cell_count: u32, start: u32, end: u32) -> Self {
         TremauxSolver {
             current: start,
             start,
@@ -44,6 +46,8 @@ impl TremauxSolver {
             trail: Vec::new(),
             solution_path: Vec::new(),
             started: false,
+            max_steps: cell_count * 10,
+            step_count: 0,
         }
     }
 
@@ -97,6 +101,12 @@ impl TremauxSolver {
 impl SteppableSolver for TremauxSolver {
     fn step(&mut self, maze: &dyn MazeGrid) -> Option<SolveStep> {
         if self.done {
+            return None;
+        }
+
+        self.step_count += 1;
+        if self.step_count > self.max_steps {
+            self.done = true;
             return None;
         }
 
@@ -234,6 +244,7 @@ impl SteppableSolver for TremauxSolver {
         self.trail.clear();
         self.solution_path.clear();
         self.started = false;
+        self.step_count = 0;
     }
 
     fn is_done(&self) -> bool {

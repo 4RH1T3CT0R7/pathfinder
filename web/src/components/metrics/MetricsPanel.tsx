@@ -92,7 +92,7 @@ const MetricsPanel: Component<{ store: MazeState }> = (props) => {
       <div style={cardBase} class="metric-card">
         <div style={labelStyle}>{t('maze')}</div>
         <div style={{ ...valueBase, color: 'var(--text2)', 'font-size': '16px' }}>
-          {props.store.width} x {props.store.height}
+          {props.store.activeWidth()} x {props.store.activeHeight()}
         </div>
       </div>
     </div>

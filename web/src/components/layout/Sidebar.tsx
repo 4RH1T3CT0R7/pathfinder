@@ -1,6 +1,6 @@
 import { Component, Show } from 'solid-js';
 import type { MazeState, SolverAlgo, Topology, ToolMode } from '../../stores/maze';
-import { RECT_ONLY_GENERATORS } from '../../stores/maze';
+import { RECT_ONLY_GENERATORS, RECT_ONLY_SOLVERS, ALL_SOLVER_ALGOS, SOLVER_ALGO_NAMES } from '../../stores/maze';
 import { t } from '../../i18n';
 import PresetPicker from '../controls/PresetPicker';
 import ExportMenu from '../export/ExportMenu';
@@ -158,14 +158,22 @@ const Sidebar: Component<{
           onChange={(e) => props.store.setSolverAlgo(e.currentTarget.value as SolverAlgo)}
           style={{ width: '100%' }}
         >
-          <option value="bfs">BFS (Breadth-First)</option>
-          <option value="dfs">DFS (Depth-First)</option>
-          <option value="astar">A* Search</option>
-          <option value="dijkstra">Dijkstra</option>
-          <option value="greedy_bfs">Greedy Best-First</option>
-          <option value="wall_follower">Wall Follower</option>
-          <option value="tremaux">Tremaux</option>
-          <option value="dead_end_filling">Dead-End Filling</option>
+          {(() => {
+            const isRect = props.store.topology() === 'rectangular';
+            const solvers = [
+              { value: 'bfs', label: 'BFS (Breadth-First)' },
+              { value: 'dfs', label: 'DFS (Depth-First)' },
+              { value: 'astar', label: 'A* Search' },
+              { value: 'dijkstra', label: 'Dijkstra' },
+              { value: 'greedy_bfs', label: 'Greedy Best-First' },
+              { value: 'wall_follower', label: 'Wall Follower' },
+              { value: 'tremaux', label: 'Tremaux' },
+              { value: 'dead_end_filling', label: 'Dead-End Filling' },
+            ];
+            return solvers
+              .filter((s) => isRect || !RECT_ONLY_SOLVERS.includes(s.value as any))
+              .map((s) => <option value={s.value}>{s.label}</option>);
+          })()}
         </select>
 
         {/* Compare mode toggle */}
@@ -211,26 +219,40 @@ const Sidebar: Component<{
           </label>
         </div>
 
-        {/* Second algorithm selector (shown when compare mode is on) */}
+        {/* Algorithm checklist for comparison (shown when compare mode is on) */}
         <Show when={props.store.compareMode()}>
           <div style={{ 'margin-top': '8px' }}>
-            <label style={{ 'font-size': '11px', color: 'var(--text2)', display: 'block', 'margin-bottom': '4px' }}>
+            <label style={{ 'font-size': '11px', color: 'var(--text2)', display: 'block', 'margin-bottom': '6px' }}>
               {t('compareWith')}
             </label>
-            <select
-              value={props.store.compareAlgo()}
-              onChange={(e) => props.store.setCompareAlgo(e.currentTarget.value as SolverAlgo)}
-              style={{ width: '100%' }}
-            >
-              <option value="bfs">BFS (Breadth-First)</option>
-              <option value="dfs">DFS (Depth-First)</option>
-              <option value="astar">A* Search</option>
-              <option value="dijkstra">Dijkstra</option>
-              <option value="greedy_bfs">Greedy Best-First</option>
-              <option value="wall_follower">Wall Follower</option>
-              <option value="tremaux">Tremaux</option>
-              <option value="dead_end_filling">Dead-End Filling</option>
-            </select>
+            {ALL_SOLVER_ALGOS.filter(algo => props.store.topology() === 'rectangular' || !RECT_ONLY_SOLVERS.includes(algo)).map((algo) => {
+              const isChecked = () => props.store.compareAlgos().includes(algo);
+              const toggle = () => {
+                const current = props.store.compareAlgos();
+                if (isChecked()) {
+                  if (current.length > 2) {
+                    props.store.setCompareAlgos(current.filter(a => a !== algo));
+                  }
+                } else {
+                  props.store.setCompareAlgos([...current, algo]);
+                }
+              };
+              return (
+                <label style={{
+                  display: 'flex', 'align-items': 'center', gap: '6px',
+                  'font-size': '11px', color: isChecked() ? 'var(--text)' : 'var(--text3)',
+                  cursor: 'pointer', padding: '2px 0',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={isChecked()}
+                    onChange={toggle}
+                    style={{ 'accent-color': 'var(--cyan)' }}
+                  />
+                  {SOLVER_ALGO_NAMES[algo]}
+                </label>
+              );
+            })}
           </div>
         </Show>
       </div>
