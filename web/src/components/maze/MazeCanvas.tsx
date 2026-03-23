@@ -367,7 +367,7 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
 
     const vt = viewTransform();
     const rawFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
-    const newScale = Math.max(0.5, Math.min(6, vt.scale * rawFactor));
+    const newScale = Math.max(0.1, Math.min(10, vt.scale * rawFactor));
 
     // Don't update offset if scale didn't change (hit the limit)
     if (newScale === vt.scale) return;
@@ -392,11 +392,13 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
 
   // Pointer handlers -- tool-mode aware
   const handlePointerDown = (e: PointerEvent) => {
-    if (e.button !== 0) return;
-
     const mode = props.store.toolMode();
 
-    if (mode === 'pan') {
+    // Middle mouse (1), right mouse (2), or spacebar held always pans
+    const forcePan = e.button === 1 || e.button === 2 || spaceHeld;
+    if (e.button !== 0 && !forcePan) return;
+
+    if (mode === 'pan' || forcePan) {
       isPanning = true;
       panStartX = e.clientX;
       panStartY = e.clientY;
@@ -455,7 +457,7 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
   const handlePointerMove = (e: PointerEvent) => {
     const mode = props.store.toolMode();
 
-    if (mode === 'pan' && isPanning) {
+    if (isPanning) {
       const dx = e.clientX - panStartX;
       const dy = e.clientY - panStartY;
       setViewTransform((prev) => ({
@@ -484,8 +486,33 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
     }
   };
 
+  // Spacebar pan support — temporarily switches tool to 'pan'
+  let spaceHeld = false;
+  let toolBeforeSpace: string | null = null;
+
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.code === 'Space' && !spaceHeld) {
+      e.preventDefault();
+      spaceHeld = true;
+      toolBeforeSpace = props.store.toolMode();
+      props.store.setToolMode('pan');
+    }
+  };
+
+  const handleKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      spaceHeld = false;
+      if (toolBeforeSpace) {
+        props.store.setToolMode(toolBeforeSpace as any);
+        toolBeforeSpace = null;
+      }
+    }
+  };
+
   /** Compute the CSS cursor based on tool mode. */
   const getCursor = (): string => {
+    if (spaceHeld || isPanning) return 'grabbing';
     const mode = props.store.toolMode();
     if (mode === 'draw' || mode === 'erase') return 'crosshair';
     if (mode === 'set-start' || mode === 'set-end') return 'pointer';
@@ -499,7 +526,13 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
     const observer = new ResizeObserver(() => renderMaze());
     if (containerRef) observer.observe(containerRef);
     renderMaze();
-    onCleanup(() => observer.disconnect());
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    });
   });
 
   // React to data changes
@@ -524,6 +557,7 @@ const MazeCanvas: Component<{ store: MazeState; canvasRef?: (el: HTMLCanvasEleme
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onDblClick={resetView}
+      onContextMenu={(e) => e.preventDefault()}
       style={{
         width: '100%',
         height: '100%',

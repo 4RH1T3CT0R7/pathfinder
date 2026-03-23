@@ -172,15 +172,17 @@ function renderRectMaze(
   ctx.stroke(wallPath);
 
   // Draw solution path line with glow
-  if (solutionPath.length > 1 && cellSize >= 3) {
-    const pathLineWidth = Math.max(1.5, cellSize / 4);
+  if (solutionPath.length > 1) {
+    const pathLineWidth = Math.max(1, cellSize / 3);
     ctx.save();
     ctx.strokeStyle = '#34d399';
     ctx.lineWidth = pathLineWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.shadowColor = '#34d399';
-    ctx.shadowBlur = 8;
+    if (cellSize >= 4) {
+      ctx.shadowColor = '#34d399';
+      ctx.shadowBlur = 8;
+    }
     ctx.beginPath();
     for (let i = 0; i < solutionPath.length; i++) {
       const cell = solutionPath[i];
