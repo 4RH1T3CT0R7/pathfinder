@@ -1,5 +1,7 @@
 # pathfinder
 
+**[Live Demo](https://4rh1t3ct0r7.github.io/pathfinder/)**
+
 Interactive maze visualizer and solver built with Rust (WASM) and SolidJS.
 
 ![Screenshot](docs/screenshot.png)
